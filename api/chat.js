@@ -13,8 +13,8 @@ export default async function handler(req, res) {
   try {
     let response, data;
     if (provider === "gemini") {
-      const key = process.env.GEMINI_API_KEY;
-      if (!key) return res.status(503).json({ error: "Gemini is not configured. Add GEMINI_API_KEY in Vercel → Settings → Environment Variables." });
+      const key = process.env.GEMINI_API_KEY || process.env.GEMINI_KEY;
+      if (!key) return res.status(503).json({ error: "Gemini is not configured. Add GEMINI_API_KEY or GEMINI_KEY in Vercel → Settings → Environment Variables." });
       const contents = [{ role: "user", parts: [{ text: system }] }, ...messages.map(m => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] }))];
       response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + encodeURIComponent(key), {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: 1200 } })
