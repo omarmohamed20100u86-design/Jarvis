@@ -12,6 +12,41 @@ export default async function handler(req, res) {
     : "You are JARVIS, a helpful, capable voice-first assistant. Answer naturally and concisely because replies may be spoken aloud. Be honest about uncertainty.";
   try {
     let response, data;
+    if (provider === "core") {
+      const ollamaUrl = (process.env.OLLAMA_BASE_URL || "").replace(/\/$/, "");
+      if (ollamaUrl && /^https:\/\//i.test(ollamaUrl)) {
+        response = await fetch(ollamaUrl + "/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(process.env.OLLAMA_API_KEY ? { Authorization: "Bearer " + process.env.OLLAMA_API_KEY } : {}) },
+          body: JSON.stringify({ model: process.env.OLLAMA_MODEL || "qwen2.5:1.5b-instruct", stream: false, messages: [{ role: "system", content: system + " You are running through Jarvis Core; be clear about limitations and never claim a tool action succeeded unless verified." }, ...messages.slice(-20)] }),
+          signal: AbortSignal.timeout(45000)
+        });
+        data = await response.json();
+        if (!response.ok) return res.status(502).json({ error: data.error?.message || "Configured Ollama-compatible model failed." });
+        return res.status(200).json({ reply: data.message?.content || "The configured model returned an empty response.", engine: "ollama-compatible" });
+      }
+      const geminiKey = process.env.GEMINI_API_KEY || process.env.GEMINI_KEY;
+      if (geminiKey) {
+        const contents = [{ role: "user", parts: [{ text: system + " You are running through Jarvis Core; be clear about limitations and never claim a tool action succeeded unless verified." }] }, ...messages.slice(-20).map(m => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.content || "") }] }))];
+        response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + encodeURIComponent(geminiKey), {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.5, maxOutputTokens: 1200 } })
+        });
+        data = await response.json();
+        if (!response.ok) return res.status(response.status).json({ error: data.error?.message || "Gemini request failed." });
+        return res.status(200).json({ reply: data.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("") || "I couldn't generate a reply.", engine: "gemini-2.5-flash" });
+      }
+      const groqKey = process.env.GROQ_API_KEY;
+      if (groqKey) {
+        response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + groqKey },
+          body: JSON.stringify({ model: "llama-3.3-70b-versatile", messages: [{ role: "system", content: system + " You are running through Jarvis Core; be clear about limitations and never claim a tool action succeeded unless verified." }, ...messages.slice(-20)], temperature: 0.5, max_tokens: 1200 })
+        });
+        data = await response.json();
+        if (!response.ok) return res.status(response.status).json({ error: data.error?.message || "Groq request failed." });
+        return res.status(200).json({ reply: data.choices?.[0]?.message?.content || "I couldn't generate a reply.", engine: "groq" });
+      }
+      return res.status(503).json({ error: "Jarvis Core has no model configured. Add a protected HTTPS OLLAMA_BASE_URL, or configure a free-tier GEMINI_API_KEY/GROQ_API_KEY in Vercel Environment Variables." });
+    }
     if (provider === "gemini") {
       const key = process.env.GEMINI_API_KEY || process.env.GEMINI_KEY;
       if (!key) return res.status(503).json({ error: "Gemini is not configured. Add GEMINI_API_KEY or GEMINI_KEY in Vercel → Settings → Environment Variables." });
