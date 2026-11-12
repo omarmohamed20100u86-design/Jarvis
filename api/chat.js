@@ -47,6 +47,32 @@ export default async function handler(req, res) {
       }
       return res.status(503).json({ error: "Jarvis Core has no model configured. Add a protected HTTPS OLLAMA_BASE_URL, or configure a free-tier GEMINI_API_KEY/GROQ_API_KEY in Vercel Environment Variables." });
     }
+    if (provider === "claude") {
+      const key = process.env.ANTHROPIC_API_KEY;
+      if (!key) return res.status(503).json({ error: "ANTHROPIC_API_KEY is missing. Add it in Vercel → Project Settings → Environment Variables, then redeploy." });
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929",
+          max_tokens: 1200,
+          system: system,
+          messages: messages.slice(-20).map(m => ({
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: String(m.content || "")
+          }))
+        }),
+        signal: AbortSignal.timeout(45000)
+      });
+      data = await response.json();
+      if (!response.ok) return res.status(response.status).json({ error: data.error?.message || "Claude API request failed." });
+      const reply = (data.content || []).filter(part => part.type === "text").map(part => part.text).join("\\n");
+      return res.status(200).json({ reply: reply || "Claude returned an empty response.", engine: data.model || "claude" });
+    }
     if (provider === "gemini") {
       const key = process.env.GEMINI_API_KEY || process.env.GEMINI_KEY;
       if (!key) return res.status(503).json({ error: "Gemini is not configured. Add GEMINI_API_KEY or GEMINI_KEY in Vercel → Settings → Environment Variables." });
